@@ -26,10 +26,11 @@ You MUST create a task for each of these items and complete them in order:
 3. **Ask clarifying questions** — one at a time, understand purpose/constraints/success criteria
 4. **Propose 2-3 approaches** — with trade-offs and your recommendation
 5. **Present design** — in sections scaled to their complexity, get user approval after each section
-6. **Write design doc** — save to `docs/superpowers/specs/YYYY-MM-DD-<topic>-design.md` and commit
-7. **Spec self-review** — quick inline check for placeholders, contradictions, ambiguity, scope (see below)
-8. **User reviews written spec** — ask user to review the spec file before proceeding
-9. **Transition to implementation** — invoke writing-plans skill to create implementation plan
+6. **Set up development branch and feature branch** — detect or ask for dev branch, create feature branch (see Development Branch Setup below)
+7. **Write design doc** — save to `docs/superpowers/specs/YYYY-MM-DD-<topic>-design.md` and commit
+8. **Spec self-review** — quick inline check for placeholders, contradictions, ambiguity, scope (see below)
+9. **User reviews written spec** — ask user to review the spec file before proceeding
+10. **Transition to implementation** — invoke writing-plans skill to create implementation plan
 
 ## Process Flow
 
@@ -103,6 +104,71 @@ digraph brainstorming {
 - Explore the current structure before proposing changes. Follow existing patterns.
 - Where existing code has problems that affect the work (e.g., a file that's grown too large, unclear boundaries, tangled responsibilities), include targeted improvements as part of the design - the way a good developer improves code they're working in.
 - Don't propose unrelated refactoring. Stay focused on what serves the current goal.
+
+## Before Creating Files: Development Branch Setup
+
+After the user approves the design and before writing any files, set up the development branch and create a feature branch.
+
+**Announce:** "Setting up the development branch and feature branch before we create files."
+
+### Detect Development Branch
+
+Check for existing development branches:
+
+```bash
+# List local and remote branches matching common dev branch names
+git branch -a | grep -oE '(dev|develop|development|staging|next)' | head -1
+```
+
+**If a development branch was found (local or remote):**
+- If remote-only (e.g., `remotes/origin/dev`): `git checkout -b <name> origin/<name>`
+- If local: `git checkout <name>`
+- Update: `git pull origin <name>` (if remote exists)
+- Report: "Using existing development branch: `<name>`."
+
+**If only `main` or `master` exists, ask the user:**
+
+> "I don't see a dedicated development branch. Which branch should feature branches start from?"
+>
+> 1. `main` — merge features directly to main (GitHub Flow)
+> 2. `dev` — create a new `dev` branch (recommended)
+> 3. `develop` — create a new `develop` branch (Git Flow)
+> 4. Custom name — I'll tell you
+
+Wait for the user's response. If they choose a new branch:
+
+```bash
+git checkout main
+git checkout -b <chosen-name>
+```
+
+**If this is a new repository with no branches:**
+Create `main` first, then ask the user which development branch to use.
+
+### Create Feature Branch
+
+```bash
+git checkout <dev-branch>
+git checkout -b feature/<topic-name>
+```
+
+Derive `<topic-name>` from the design topic — kebab-case, short, descriptive (e.g., `add-task-manager`, `fix-date-format`).
+
+Report: "Feature branch `feature/<topic-name>` created from `<dev-branch>`. Writing the design spec now."
+
+Then continue to **Documentation** below.
+
+### Red Flags
+
+**Never:**
+- Write any file before the feature branch is created
+- Create a feature branch from a branch other than the development branch
+- Proceed without confirming the development branch (don't guess)
+
+**Always:**
+- Check for existing development branches before asking the user
+- Use kebab-case for feature branch names derived from the design topic
+- Pull latest changes from remote before creating the feature branch
 
 ## After the Design
 

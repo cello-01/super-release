@@ -109,8 +109,116 @@ git merge <feature-branch>
 # Verify tests on merged result
 <test command>
 
-# Only after merge succeeds: cleanup worktree (Step 6), then delete branch
+# Only after merge succeeds: prepare release, then cleanup
 ```
+
+### Prepare Release
+
+After merge succeeds and tests pass, bump the project version and create a release tag.
+
+**Announce:** "Merge successful. Preparing the release."
+
+#### Step 5a: Detect Version Configuration
+
+Check if the project has a `.version-bump.json`:
+
+```bash
+if [ -f .version-bump.json ]; then
+  echo "Using .version-bump.json configuration"
+fi
+```
+
+**If `.version-bump.json` exists:**
+Read the declared version files and fields — same format as Superpowers' own `.version-bump.json`. Each entry has `path` (relative to project root) and `field` (dot-separated JSON path or TOML key).
+
+**If not, auto-detect from common project files:**
+
+| Project type | File | Field |
+|-------------|------|-------|
+| Node.js | `package.json` | `version` |
+| Python | `pyproject.toml` | `project.version` |
+| Rust | `Cargo.toml` | `package.version` |
+
+If no version file is found, ask the user where the project version is stored and offer to create a `.version-bump.json`:
+
+```json
+{
+  "files": [
+    { "path": "package.json", "field": "version" }
+  ]
+}
+```
+
+#### Step 5b: Ask for Bump Type
+
+Read the current version and present options:
+
+> "Current version: **X.Y.Z**. What type of bump?"
+>
+> 1. **patch** (X.Y.Z+1) — bug fixes and minor changes
+> 2. **minor** (X.Y+1.0) — new features, backward-compatible
+> 3. **major** (X+1.0.0) — breaking changes
+> 4. **skip** — no version bump this time
+
+Wait for the user's response. If they choose skip, go directly to Step 6 (Cleanup Workspace).
+
+#### Step 5c: Calculate and Apply New Version
+
+Apply SemVer rules:
+- **patch**: increment Z only (X.Y.Z → X.Y.Z+1)
+- **minor**: increment Y, reset Z to 0 (X.Y.Z → X.Y+1.0)
+- **major**: increment X, reset Y and Z to 0 (X.Y.Z → X+1.0.0)
+
+Update each declared or detected version file:
+
+```bash
+# For JSON files (package.json, etc.)
+jq ".version = \"$NEW_VERSION\"" package.json > package.json.tmp && mv package.json.tmp package.json
+
+# For TOML files (pyproject.toml, Cargo.toml)
+# Use sed or a TOML-aware tool to replace the version line
+```
+
+If the project has multiple version files (declared in `.version-bump.json`), update every one to the same new version.
+
+#### Step 5d: Update Release Notes
+
+Add a new entry at the top of `RELEASE-NOTES.md`. Create the file if it does not exist:
+
+```markdown
+## vX.Y.Z (YYYY-MM-DD)
+
+### Added
+- <feature summary derived from the plan's Goal line and design spec>
+
+### Changed
+- <if applicable>
+
+### Fixed
+- <if applicable>
+```
+
+Derive the feature summary from the implementation plan's **Goal** header and the design spec. Keep entries concise — one line per item.
+
+#### Step 5e: Commit and Tag
+
+```bash
+git add <version-files> RELEASE-NOTES.md
+git commit -m "Release vX.Y.Z"
+git tag -a "vX.Y.Z" -m "Release vX.Y.Z"
+```
+
+Report: "Release vX.Y.Z tagged and committed."
+
+#### Step 5f: Return to Development Branch
+
+```bash
+git checkout <dev-branch>
+```
+
+Detect the development branch using the same logic as the start gate (check for `dev`, `develop`, `development`, `staging`, `next`; fall back to `main`).
+
+Report: "Returned to development branch `<dev-branch>`."
 
 Then: Cleanup worktree (Step 6), then delete branch:
 

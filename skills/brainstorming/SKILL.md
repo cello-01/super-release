@@ -43,6 +43,7 @@ digraph brainstorming {
     "Propose 2-3 approaches" [shape=box];
     "Present design sections" [shape=box];
     "User approves design?" [shape=diamond];
+    "Set up development branch\nand feature branch" [shape=box];
     "Write design doc" [shape=box];
     "Spec self-review\n(fix inline)" [shape=box];
     "User reviews spec?" [shape=diamond];
@@ -56,7 +57,8 @@ digraph brainstorming {
     "Propose 2-3 approaches" -> "Present design sections";
     "Present design sections" -> "User approves design?";
     "User approves design?" -> "Present design sections" [label="no, revise"];
-    "User approves design?" -> "Write design doc" [label="yes"];
+    "User approves design?" -> "Set up development branch\nand feature branch" [label="yes"];
+    "Set up development branch\nand feature branch" -> "Write design doc";
     "Write design doc" -> "Spec self-review\n(fix inline)";
     "Spec self-review\n(fix inline)" -> "User reviews spec?";
     "User reviews spec?" -> "Write design doc" [label="changes requested"];
@@ -113,17 +115,38 @@ After the user approves the design and before writing any files, set up the deve
 
 ### Detect Development Branch
 
-Check for existing development branches:
+Check for existing local or `origin` development branches:
 
 ```bash
-# List local and remote branches matching common dev branch names
-git branch -a | grep -oE '(dev|develop|development|staging|next)' | head -1
+# Print the highest-priority matching branch, preserving local vs origin/<name>
+git for-each-ref --format='%(refname:short)' refs/heads refs/remotes/origin | awk '
+  $0 == "origin/HEAD" { next }
+  {
+    branch = $0
+    name = branch
+    sub(/^origin\//, "", name)
+    if (name !~ /^(dev|develop|development|staging|next)$/) next
+
+    priority = (name == "dev" ? 1 : name == "develop" ? 2 : name == "development" ? 3 : name == "staging" ? 4 : 5)
+    priorities[name] = priority
+    if (!(name in matches) || branch !~ /^origin\//) matches[name] = branch
+  }
+  END {
+    for (i = 1; i <= 5; i++) {
+      for (name in priorities) {
+        if (priorities[name] == i) {
+          print matches[name]
+          exit
+        }
+      }
+    }
+  }'
 ```
 
 **If a development branch was found (local or remote):**
-- If remote-only (e.g., `remotes/origin/dev`): `git checkout -b <name> origin/<name>`
+- If output is `origin/<name>`: `git checkout -b <name> origin/<name>`
 - If local: `git checkout <name>`
-- Update: `git pull origin <name>` (if remote exists)
+- Update: if `origin/<name>` exists after checkout, run `git pull --ff-only origin <name>`
 - Report: "Using existing development branch: `<name>`."
 
 **If only `main` or `master` exists, ask the user:**
@@ -138,9 +161,26 @@ git branch -a | grep -oE '(dev|develop|development|staging|next)' | head -1
 Wait for the user's response. If they choose a new branch:
 
 ```bash
-git checkout main
+BASE_BRANCH=$(
+  git show-ref --verify --quiet refs/heads/main && echo main ||
+  git show-ref --verify --quiet refs/heads/master && echo master ||
+  git show-ref --verify --quiet refs/remotes/origin/main && echo origin/main ||
+  git show-ref --verify --quiet refs/remotes/origin/master && echo origin/master
+)
+
+if [ -z "$BASE_BRANCH" ]; then
+  echo "No main or master branch found; ask the user which branch to use."
+elif [[ "$BASE_BRANCH" == origin/* ]]; then
+  LOCAL_BASE=${BASE_BRANCH#origin/}
+  git checkout -b "$LOCAL_BASE" "$BASE_BRANCH"
+else
+  git checkout "$BASE_BRANCH"
+fi
+
 git checkout -b <chosen-name>
 ```
+
+Treat the user's selected starting branch as `<dev-branch>` in the following steps. For GitHub Flow, `<dev-branch>` may be `main`.
 
 **If this is a new repository with no branches:**
 Create `main` first, then ask the user which development branch to use.
@@ -162,7 +202,7 @@ Then continue to **Documentation** below.
 
 **Never:**
 - Write any file before the feature branch is created
-- Create a feature branch from a branch other than the development branch
+- Create a feature branch from a branch other than the selected starting branch
 - Proceed without confirming the development branch (don't guess)
 
 **Always:**

@@ -1,6 +1,46 @@
 #!/usr/bin/env bash
 # Helper functions for Claude Code skill tests
 
+TEST_HELPERS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PLUGIN_DIR="$(cd "$TEST_HELPERS_DIR/../.." && pwd)"
+
+# Run a command with a timeout. macOS does not ship GNU timeout.
+run_with_timeout() {
+    local seconds="$1"
+    shift
+
+    if command -v timeout >/dev/null 2>&1; then
+        timeout "$seconds" "$@"
+    elif command -v gtimeout >/dev/null 2>&1; then
+        gtimeout "$seconds" "$@"
+    elif command -v python3 >/dev/null 2>&1; then
+        python3 - "$seconds" "$@" <<'PY'
+import os
+import signal
+import subprocess
+import sys
+
+seconds = float(sys.argv[1])
+command = sys.argv[2:]
+
+process = subprocess.Popen(command, start_new_session=True)
+try:
+    sys.exit(process.wait(timeout=seconds))
+except subprocess.TimeoutExpired:
+    os.killpg(process.pid, signal.SIGTERM)
+    try:
+        process.wait(timeout=2)
+    except subprocess.TimeoutExpired:
+        os.killpg(process.pid, signal.SIGKILL)
+        process.wait()
+    sys.exit(124)
+PY
+    else
+        echo "error: timeout requires GNU timeout, gtimeout, or python3" >&2
+        return 127
+    fi
+}
+
 # Run Claude Code with a prompt and capture output
 # Usage: run_claude "prompt text" [timeout_seconds] [allowed_tools]
 run_claude() {
@@ -10,13 +50,13 @@ run_claude() {
     local output_file=$(mktemp)
 
     # Build command
-    local cmd="claude -p \"$prompt\""
+    local cmd="claude -p \"$prompt\" --plugin-dir \"$PLUGIN_DIR\""
     if [ -n "$allowed_tools" ]; then
         cmd="$cmd --allowed-tools=$allowed_tools"
     fi
 
     # Run Claude in headless mode with timeout
-    if timeout "$timeout" bash -c "$cmd" > "$output_file" 2>&1; then
+    if run_with_timeout "$timeout" bash -c "$cmd" > "$output_file" 2>&1; then
         cat "$output_file"
         rm -f "$output_file"
         return 0
@@ -97,9 +137,13 @@ assert_order() {
     local pattern_b="$3"
     local test_name="${4:-test}"
 
-    # Get line numbers where patterns appear
-    local line_a=$(echo "$output" | grep -n "$pattern_a" | head -1 | cut -d: -f1)
-    local line_b=$(echo "$output" | grep -n "$pattern_b" | head -1 | cut -d: -f1)
+    # Get first line and column where each pattern appears.
+    local pos_a=$(printf '%s\n' "$output" | awk -v pat="$pattern_a" 'match($0, pat) { print NR ":" RSTART; exit }')
+    local pos_b=$(printf '%s\n' "$output" | awk -v pat="$pattern_b" 'match($0, pat) { print NR ":" RSTART; exit }')
+    local line_a=${pos_a%%:*}
+    local col_a=${pos_a#*:}
+    local line_b=${pos_b%%:*}
+    local col_b=${pos_b#*:}
 
     if [ -z "$line_a" ]; then
         echo "  [FAIL] $test_name: pattern A not found: $pattern_a"
@@ -111,13 +155,13 @@ assert_order() {
         return 1
     fi
 
-    if [ "$line_a" -lt "$line_b" ]; then
-        echo "  [PASS] $test_name (A at line $line_a, B at line $line_b)"
+    if [ "$line_a" -lt "$line_b" ] || { [ "$line_a" -eq "$line_b" ] && [ "$col_a" -lt "$col_b" ]; }; then
+        echo "  [PASS] $test_name (A at line $line_a:$col_a, B at line $line_b:$col_b)"
         return 0
     else
         echo "  [FAIL] $test_name"
         echo "  Expected '$pattern_a' before '$pattern_b'"
-        echo "  But found A at line $line_a, B at line $line_b"
+        echo "  But found A at line $line_a:$col_a, B at line $line_b:$col_b"
         return 1
     fi
 }
@@ -193,6 +237,7 @@ EOF
 
 # Export functions for use in tests
 export -f run_claude
+export -f run_with_timeout
 export -f assert_contains
 export -f assert_not_contains
 export -f assert_count
